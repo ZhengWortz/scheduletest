@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agenda de Demandas — Por Funcionário</title>
+
+  <!--
+    =====================================================================
+    O QUE É ESTE ARQUIVO?
+    ---------------------------------------------------------------------
+    Este é um "aplicativo de página única": todo o sistema (visual, regras
+    e armazenamento) está dentro deste único arquivo HTML. Ele não precisa
+    de internet nem de instalação — basta abrir no navegador.
+
+    COMO O SISTEMA ESTÁ DIVIDIDO (leia como um sumário):
+
+      1. <style>  → Aparência (cores, tamanhos, espaçamentos, layout).
+      2. <body>   → Estrutura visível:
+                     • Tela de login / cadastro de usuário
+                     • Tela principal com o formulário e a lista de demandas
+      3. <script> → O "cérebro" do sistema:
+                     • Constantes (nomes fixos usados para guardar dados)
+                     • Estado (o que o sistema "lembra" enquanto está aberto)
+                     • Referências aos elementos da tela
+                     • Utilitários (funções auxiliares pequenas)
+                     • Usuários (cadastro e validação de login)
+                     • Sessão (quem está logado agora)
+                     • Persistência de demandas (salvar/carregar por funcionário)
+                     • Renderização (montar a lista na tela)
+                     • CRUD (criar, ler, atualizar, excluir demandas)
+                     • Edição (preencher o formulário para alterar algo)
+                     • Navegação entre telas (login ↔ app)
+                     • Eventos (o que acontece ao clicar/enviar)
+                     • Inicialização (o que roda ao abrir a página)
+
+    ONDE OS DADOS FICAM GUARDADOS?
+    ---------------------------------------------------------------------
+    No próprio navegador do usuário (recurso chamado "localStorage"),
+    separado do arquivo. É como se o navegador tivesse "gavetas etiquetadas":
+      • gaveta "agenda_usuarios_v1"            → lista de usuários cadastrados
+      • gaveta "agenda_demandas_v1::<usuario>" → demandas de CADA usuário
+      • gaveta "agenda_sessao_v1"              → quem está logado agora
+                                                 (esta fica em outro local,
+                                                  chamado "sessionStorage",
+                                                  que é limpo ao fechar a aba)
+
+    IMPORTANTE PARA O RH ENTENDER:
+    Este é um protótipo local. Não há servidor nem segurança real de senha.
+    Para uso oficial na empresa, seria necessário um sistema com login
+    validado por um servidor (backend).
+    =====================================================================
+  -->
+
+  <style>
+    /* =================================================================
+       PARTE 1 — APARÊNCIA (CSS)
+       -----------------------------------------------------------------
+       Aqui só se define "como as coisas parecem": cores, fontes,
+       espaçamentos, bordas, sombras e o que acontece em telas pequenas
+       (celular). Nada aqui mexe em dados ou nas regras do sistema.
+       ================================================================= */
+
+    /* Reset básico: padroniza o espaçamento em todos os navegadores */
+    * { box-sizing: border-box; margin: 0; padding: 0;
+        font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif; }
+
+    /* "Variáveis" de cor: mudam em um só lugar e refletem no sistema todo.
+       É como uma paleta de cores oficial do app. */
+    :root {
+      --bg: #f4f6f9;            /* cor de fundo geral (cinza claro)         */
+      --card-bg: #fff;          /* cor dos "cartões" (branco)               */
+      --text: #1e293b;          /* cor do texto principal (cinza escuro)    */
+      --text-muted: #64748b;    /* cor de textos secundários (cinza médio)  */
+      --border: #e2e8f0;        /* cor das bordas                           */
+      --primary: #2563eb;       /* azul principal (botões de ação)          */
+      --primary-hover: #1d4ed8; /* azul mais escuro ao passar o mouse       */
+      --danger: #dc2626;        /* vermelho (ações destrutivas, como excluir)*/
+      --danger-hover: #b91c1c;  /* vermelho escuro ao passar o mouse        */
+      --radius: 8px;            /* arredondamento padrão dos cantos         */
+      --shadow: 0 1px 3px rgba(0,0,0,0.08); /* sombra leve nos cartões    */
+    }
+
+    /* Fundo geral e espaçamento externo da página */
+    body { background: var(--bg); color: var(--text); padding: 1.5rem; min-height: 100vh; }
+
+    /* "Container" central: limita a largura e organiza os blocos em coluna */
+    .container { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 1.5rem; }
+
+    /* ---------- Cabeçalho com identificação do usuário logado ---------- */
+    .header-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
+    header h1 { font-size: 1.75rem; margin-bottom: 0.25rem; }
+    header p { color: var(--text-muted); font-size: 0.95rem; }
+
+    .user-box { display: flex; align-items: center; gap: 0.75rem; font-size: 0.9rem; }
+    .user-box .badge { background: #dbeafe; color: #1e40af; padding: 0.35rem 0.75rem;
+                       border-radius: 999px; font-weight: 600; }
+
+    /* ---------- "Cartões" brancos que agrupam cada seção da tela ---------- */
+    .card { background: var(--card-bg); border-radius: var(--radius); box-shadow: var(--shadow); padding: 1.25rem; }
+    .card h2 { font-size: 1.1rem; margin-bottom: 1rem; }
+
+    /* ---------- Formulário de cadastro/edição de demanda ---------- */
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .form-grid .full { grid-column: 1 / -1; } /* ocupa a linha inteira */
+    label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.35rem; color: var(--text-muted); }
+    input, select, textarea {
+      width: 100%; padding: 0.6rem 0.75rem; border: 1px solid var(--border);
+      border-radius: var(--radius); font-size: 0.95rem; background: #fff; color: var(--text);
+      transition: border-color .2s, box-shadow .2s;
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,.15);
+    }
+    textarea { resize: vertical; min-height: 70px; }
+
+    .form-actions { display: flex; gap: .75rem; margin-top: 1rem; flex-wrap: wrap; }
+
+    /* ---------- Botões (padrão geral e variações) ---------- */
+    button { cursor: pointer; border: none; border-radius: var(--radius);
+             padding: .6rem 1.1rem; font-size: .9rem; font-weight: 600;
+             transition: background .2s, transform .05s; }
+    button:active { transform: scale(.98); } /* efeito de "apertar" */
+
+    .btn-primary { background: var(--primary); color: #fff; }      /* ação principal   */
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-secondary { background: #e2e8f0; color: var(--text); }    /* ação neutra      */
+    .btn-secondary:hover { background: #cbd5e1; }
+    .btn-danger { background: var(--danger); color: #fff; }        /* ação destrutiva  */
+    .btn-danger:hover { background: var(--danger-hover); }
+    .btn-small { padding: .35rem .7rem; font-size: .8rem; }
+
+    /* Utilitário: esconde um elemento sem removê-lo da página */
+    .hidden { display: none !important; }
+
+    /* ---------- Barra de filtros e contadores ---------- */
+    .toolbar { display: flex; flex-direction: column; gap: 1rem; }
+    .filters { display: flex; gap: .5rem; flex-wrap: wrap; }
+    .filter-btn { background: #e2e8f0; color: var(--text); font-size: .85rem; padding: .45rem .9rem; }
+    .filter-btn.active { background: var(--primary); color: #fff; }
+    .filter-btn:hover:not(.active) { background: #cbd5e1; }
+    .counters { display: flex; gap: .75rem; flex-wrap: wrap; }
+    .counter { font-size: .8rem; background: #f1f5f9; border: 1px solid var(--border);
+               padding: .3rem .7rem; border-radius: 999px; color: var(--text-muted); }
+    .counter strong { color: var(--text); }
+
+    /* ---------- Lista de demandas em formato de cartões ---------- */
+    .demandas-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+    .demanda-card {
+      border: 1px solid var(--border); border-left: 5px solid #cbd5e1;
+      border-radius: var(--radius); padding: 1rem;
+      display: flex; flex-direction: column; gap: .5rem;
+      background: #fff; transition: box-shadow .2s;
+    }
+    .demanda-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+
+    /* Faixa colorida à esquerda do cartão indica o STATUS da demanda:
+       laranja = A Fazer | azul = Em Andamento | verde = Concluído | vermelho = Cancelado */
+    .status-afazer { border-left-color: #f59e0b; }
+    .status-andamento { border-left-color: #3b82f6; }
+    .status-concluido { border-left-color: #10b981; }
+    .status-cancelado { border-left-color: #ef4444; }
+
+    .demanda-card h3 { font-size: 1rem; word-break: break-word; }
+    .demanda-descricao { font-size: .88rem; color: var(--text-muted); word-break: break-word; white-space: pre-wrap; }
+    .demanda-data { font-size: .8rem; color: var(--text-muted); }
+    .demanda-meta { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-top: .25rem; }
+    .status-select { font-size: .8rem; padding: .3rem .5rem; border-radius: 6px; border: 1px solid var(--border); width: auto; }
+    .demanda-actions { display: flex; gap: .5rem; margin-top: auto; padding-top: .5rem; }
+
+    /* Mensagem exibida quando não há nenhuma demanda para mostrar */
+    .empty-state { text-align: center; padding: 2.5rem 1rem; color: var(--text-muted);
+                   font-size: .95rem; border: 2px dashed var(--border); border-radius: var(--radius); }
+
+    /* ---------- Tela de login / cadastro ---------- */
+    .auth-wrap { max-width: 420px; margin: 6vh auto 0; }
+    .auth-card { background: #fff; border-radius: var(--radius); box-shadow: var(--shadow); padding: 1.75rem; }
+    .auth-card h2 { font-size: 1.25rem; margin-bottom: .35rem; }
+    .auth-card .sub { color: var(--text-muted); font-size: .9rem; margin-bottom: 1.25rem; }
+    .auth-card .field { margin-bottom: 1rem; }
+    .auth-card .field label { color: var(--text); }
+    .auth-actions { display: flex; flex-direction: column; gap: .6rem; }
+    .auth-actions button { width: 100%; }
+    .auth-switch { text-align: center; font-size: .85rem; color: var(--text-muted); margin-top: .75rem; }
+    .auth-switch a { color: var(--primary); text-decoration: none; font-weight: 600; cursor: pointer; }
+    .auth-switch a:hover { text-decoration: underline; }
+
+    /* Caixa vermelha de mensagem de erro no login/cadastro */
+    .auth-error { background: #fee2e2; color: #b91c1c; padding: .6rem .8rem;
+                  border-radius: var(--radius); font-size: .85rem; margin-bottom: 1rem; }
+
+    /* Aviso amarelo informando que é uma demonstração local */
+    .aviso-seguranca { font-size: .78rem; color: var(--text-muted); margin-top: 1rem;
+                       padding: .6rem .75rem; background: #fefce8; border: 1px solid #fde68a;
+                       border-radius: var(--radius); }
+
+    /* ---------- Ajustes para telas pequenas (celular) ---------- */
+    @media (max-width: 640px) {
+      body { padding: 1rem; }
+      .form-grid { grid-template-columns: 1fr; }   /* campos um embaixo do outro */
+      .demandas-list { grid-template-columns: 1fr; }
+      .header-row { flex-direction: column; align-items: stretch; }
+      .user-box { justify-content: space-between; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <!--
+      =====================================================================
+      PARTE 2A — TELA DE LOGIN / CADASTRO
+      ---------------------------------------------------------------------
+      Esta tela aparece ANTES de o funcionário entrar no sistema.
+      Ela é a "porta de entrada". Só é exibida quando o usuário NÃO está
+      logado. Por padrão, começa escondida (classe "hidden") e o script
+      decide quando mostrá-la.
+      =====================================================================
+    -->
+    <div id="view-auth" class="auth-wrap hidden">
+      <div class="auth-card">
+        <!-- Título e subtítulo mudam conforme o modo (Entrar / Criar conta) -->
+        <h2 id="auth-title">Entrar</h2>
+        <p class="sub" id="auth-subtitle">Acesse sua agenda pessoal de demandas.</p>
+
+        <!-- Caixa vermelha onde aparecem mensagens de erro (ex.: senha errada) -->
+        <div id="auth-error" class="auth-error hidden"></div>
+
+        <form id="auth-form" novalidate>
+          <!-- Campo: nome de usuário -->
+          <div class="field">
+            <label for="auth-username">Usuário</label>
+            <input type="text" id="auth-username" autocomplete="username"
+                   placeholder="ex.: maria.silva" required />
+          </div>
+
+          <!-- Campo: senha -->
+          <div class="field">
+            <label for="auth-password">Senha</label>
+            <input type="password" id="auth-password" autocomplete="current-password"
+                   placeholder="Mínimo 4 caracteres" required />
+          </div>
+
+          <!-- Campo: confirmação de senha (aparece SÓ no cadastro) -->
+          <div class="field hidden" id="field-confirm">
+            <label for="auth-password-confirm">Confirmar senha</label>
+            <input type="password" id="auth-password-confirm" autocomplete="new-password" />
+          </div>
+
+          <div class="auth-actions">
+            <button type="submit" class="btn-primary" id="auth-submit">Entrar</button>
+          </div>
+        </form>
+
+        <!-- Link para alternar entre "Entrar" e "Criar conta" -->
+        <div class="auth-switch">
+          <span id="auth-switch-text">Não tem conta?</span>
+          <a id="auth-switch-link" href="#">Criar conta</a>
+        </div>
+
+        <!-- Aviso de transparência: é uma demonstração local -->
+        <div class="aviso-seguranca">
+          ⚠️ <strong>Demonstração local:</strong> os dados ficam neste navegador e não há segurança real.
+          Para uso em produção, seria necessário um backend com autenticação.
+        </div>
+      </div>
+    </div>
+
+    <!--
+      =====================================================================
+      PARTE 2B — TELA PRINCIPAL (depois do login)
+      ---------------------------------------------------------------------
+      Só aparece quando há um funcionário logado. Contém:
+        • Cabeçalho com o nome do funcionário e botão "Sair"
+        • Formulário para cadastrar ou editar demandas
+        • Barra de filtros por status + contadores
+        • Lista de cartões com as demandas daquele funcionário
+      =====================================================================
+    -->
+    <div id="view-app" class="hidden" style="display:flex; flex-direction:column; gap:1.5rem;">
+      <header>
+        <div class="header-row">
+          <div>
+            <h1>📋 Minha Agenda de Demandas</h1>
+            <p>Organize suas demandas pessoais.</p>
+          </div>
+          <!-- Nome do usuário logado + botão de sair -->
+          <div class="user-box">
+            <span class="badge" id="user-badge">—</span>
+            <button type="button" class="btn-secondary btn-small" id="btn-logout">Sair</button>
+          </div>
+        </div>
+      </header>
+
+      <!-- ---------- Formulário: cadastro de uma nova demanda ---------- -->
+      <section class="card" aria-labelledby="form-title">
+        <h2 id="form-title">Nova Demanda</h2>
+        <form id="demanda-form" novalidate>
+          <!-- Campo oculto que guarda o ID quando estamos editando.
+               Quando está vazio, significa "cadastro novo". -->
+          <input type="hidden" id="demanda-id" />
+          <div class="form-grid">
+            <!-- Título: único campo obrigatório -->
+            <div class="full">
+              <label for="titulo">Título *</label>
+              <input type="text" id="titulo" name="titulo" required
+                     placeholder="Ex.: Revisar relatório mensal" />
+            </div>
+            <!-- Descrição: opcional -->
+            <div class="full">
+              <label for="descricao">Descrição</label>
+              <textarea id="descricao" name="descricao"
+                        placeholder="Detalhes opcionais..."></textarea>
+            </div>
+            <!-- Status inicial da demanda -->
+            <div>
+              <label for="status">Status</label>
+              <select id="status" name="status">
+                <option value="A Fazer">A Fazer</option>
+                <option value="Em Andamento">Em Andamento</option>
+                <option value="Concluído">Concluído</option>
+                <option value="Cancelado">Cancelado</option>
+              </select>
+            </div>
+            <!-- Data (opcional) -->
+            <div>
+              <label for="data">Data</label>
+              <input type="date" id="data" name="data" />
+            </div>
+          </div>
+          <div class="form-actions">
+            <!-- O texto deste botão muda entre "Adicionar" e "Salvar Alterações"
+                 conforme o modo (novo ou edição). -->
+            <button type="submit" class="btn-primary" id="btn-submit">Adicionar Demanda</button>
+            <!-- Só aparece quando estamos editando algo -->
+            <button type="button" class="btn-secondary hidden" id="btn-cancelar-edicao">Cancelar Edição</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- ---------- Filtros e contadores ---------- -->
+      <section class="card toolbar" aria-labelledby="filtros-title">
+        <h2 id="filtros-title" class="hidden">Filtros</h2>
+        <!-- Botões que filtram a lista por status -->
+        <div class="filters" role="group" aria-label="Filtrar por status">
+          <button class="filter-btn active" data-filter="Todos">Todos</button>
+          <button class="filter-btn" data-filter="A Fazer">A Fazer</button>
+          <button class="filter-btn" data-filter="Em Andamento">Em Andamento</button>
+          <button class="filter-btn" data-filter="Concluído">Concluído</button>
+          <button class="filter-btn" data-filter="Cancelado">Cancelado</button>
+        </div>
+        <!-- Contadores gerados automaticamente pelo script -->
+        <div class="counters" id="counters" aria-live="polite"></div>
+      </section>
+
+      <!-- ---------- Lista de demandas ---------- -->
+      <section class="card" aria-labelledby="lista-title">
+        <h2 id="lista-title">Minhas Demandas</h2>
+        <!-- Os cartões das demandas são inseridos aqui pelo JavaScript -->
+        <div id="demandas-list" class="demandas-list"></div>
+        <!-- Mensagem exibida quando não há nenhuma demanda para mostrar -->
+        <div id="empty-state" class="empty-state hidden">
+          Nenhuma demanda encontrada. Cadastre uma nova demanda acima. ✨
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    /* =====================================================================
+       PARTE 3 — O "CÉREBRO" DO SISTEMA (JavaScript)
+       ---------------------------------------------------------------------
+       Abaixo tudo é organizado em blocos. Leia como um roteiro:
+
+         [3.1] Constantes (nomes fixos usados para guardar coisas)
+         [3.2] Estado (o que o sistema "lembra" enquanto está aberto)
+         [3.3] Referências aos elementos da tela
+         [3.4] Utilitários (funções pequenas de apoio)
+         [3.5] Usuários (cadastro, busca, validação de login)
+         [3.6] Sessão (quem está logado agora)
+         [3.7] Persistência de demandas (salvar/carregar por funcionário)
+         [3.8] Renderização (montar a lista e os contadores na tela)
+         [3.9] CRUD (criar, atualizar status, atualizar tudo, excluir)
+         [3.10] Edição (preencher o formulário para alterar algo)
+         [3.11] Navegação entre telas (mostrar login ou mostrar app)
+         [3.12] Fluxo de login/cadastro/logout
+         [3.13] Eventos do formulário de demandas e filtros
+         [3.14] Inicialização (o que roda quando a página abre)
+       ===================================================================== */
+
+    /* =====================================================================
+       [3.1] CONSTANTES
+       ---------------------------------------------------------------------
+       São "etiquetas fixas" que dizem ao navegador ONDE guardar cada tipo
+       de dado. Pense como gavetas etiquetadas:
+         • USERS_KEY       → gaveta com a lista de usuários cadastrados
+         • DEMANDAS_PREFIX → prefixo das gavetas de demandas. Cada usuário
+                             tem a sua: "agenda_demandas_v1::maria.silva"
+         • SESSION_KEY     → gaveta que guarda quem está logado AGORA
+       ⚠️ Importante: se estes nomes mudarem, os dados antigos ficam
+       "órfãos" (o sistema não os acha mais). Por isso não mexemos neles.
+       ===================================================================== */
+    const USERS_KEY = 'agenda_usuarios_v1';
+    const DEMANDAS_PREFIX = 'agenda_demandas_v1::';  // + username
+    const SESSION_KEY = 'agenda_sessao_v1';
+
+    // Lista oficial dos status permitidos — usada no formulário, no filtro
+    // e nos contadores, garantindo consistência em todo o sistema.
+    const STATUS_LIST = ['A Fazer', 'Em Andamento', 'Concluído', 'Cancelado'];
+
+    // Liga cada status à sua cor (classe CSS) na faixa lateral do cartão.
+    const STATUS_CLASS = {
+      'A Fazer': 'status-afazer',          // laranja
+      'Em Andamento': 'status-andamento',  // azul
+      'Concluído': 'status-concluido',     // verde
+      'Cancelado': 'status-cancelado'      // vermelho
+    };
+
+    /* =====================================================================
+       [3.2] ESTADO
+       ---------------------------------------------------------------------
+       São as informações que o sistema guarda "na memória" enquanto a
+       página está aberta. Se a página recarregar, estas variáveis são
+       recriadas — os dados de verdade ficam nas "gavetas" (localStorage).
+       ===================================================================== */
+    let usuarioAtual = null;    // nome do funcionário logado (ou null)
+    let demandas = [];          // demandas do funcionário logado
+    let filtroAtual = 'Todos';  // filtro de status selecionado agora
+    let idEmEdicao = null;      // ID da demanda sendo editada (ou null)
+    let authMode = 'login';     // 'login' ou 'register' (tela de entrada)
+
+    /* =====================================================================
+       [3.3] REFERÊNCIAS AOS ELEMENTOS DA TELA
+       ---------------------------------------------------------------------
+       Para não ficar procurando o mesmo elemento várias vezes no HTML,
+       guardamos a referência em uma variável. É como apelidar cada peça
+       da tela com um nome curto.
+       ===================================================================== */
+    const viewAuth = document.getElementById('view-auth');
+    const viewApp  = document.getElementById('view-app');
+
+    // --- Elementos da tela de login / cadastro ---
+    const authTitle           = document.getElementById('auth-title');
+    const authSubtitle        = document.getElementById('auth-subtitle');
+    const authForm            = document.getElementById('auth-form');
+    const authUsername        = document.getElementById('auth-username');
+    const authPassword        = document.getElementById('auth-password');
+    const authPasswordConfirm = document.getElementById('auth-password-confirm');
+    const fieldConfirm        = document.getElementById('field-confirm');
+    const authSubmit          = document.getElementById('auth-submit');
+    const authError           = document.getElementById('auth-error');
+    const authSwitchText      = document.getElementById('auth-switch-text');
+    const authSwitchLink      = document.getElementById('auth-switch-link');
+
+    // --- Elementos da tela principal ---
+    const userBadge          = document.getElementById('user-badge');
+    const btnLogout          = document.getElementById('btn-logout');
+    const form               = document.getElementById('demanda-form');
+    const inputId            = document.getElementById('demanda-id');
+    const inputTitulo        = document.getElementById('titulo');
+    const inputDescricao     = document.getElementById('descricao');
+    const inputStatus        = document.getElementById('status');
+    const inputData          = document.getElementById('data');
+    const btnSubmit          = document.getElementById('btn-submit');
+    const btnCancelarEdicao  = document.getElementById('btn-cancelar-edicao');
+    const listaEl            = document.getElementById('demandas-list');
+    const emptyStateEl       = document.getElementById('empty-state');
+    const countersEl         = document.getElementById('counters');
+    const formTitle          = document.getElementById('form-title');
+    const filterBtns         = document.querySelectorAll('.filter-btn');
+
+    /* =====================================================================
+       [3.4] UTILITÁRIOS
+       ---------------------------------------------------------------------
+       Funções pequenas que servem de apoio ao resto do sistema.
+       ===================================================================== */
+
+    // Transforma a senha em um "código" (hash) simples.
+    // Serve apenas para NÃO guardar a senha em texto puro no navegador.
+    // ⚠️ NÃO é criptografia de verdade — para uso real seria preciso backend.
+    function hashSimples(str) {
+      let h = 0;
+      for (let i = 0; i < str.length; i++) {
+        h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+      }
+      return 'h' + (h >>> 0).toString(16);
+    }
+
+    // Gera um identificador único para cada demanda (evita confusão entre
+    // demandas com o mesmo título, por exemplo).
+    function gerarId() {
+      return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    }
+
+    // Converte uma data do formato "AAAA-MM-DD" (do input date)
+    // para o formato brasileiro "DD/MM/AAAA" (mais amigável de ler).
+    function formatarData(iso) {
+      if (!iso) return '';
+      const [a, m, d] = iso.split('-');
+      return (a && m && d) ? `${d}/${m}/${a}` : iso;
+    }
+
+    // Mostra uma mensagem de erro na tela de login/cadastro.
+    function mostrarErroAuth(msg) {
+      authError.textContent = msg;
+      authError.classList.remove('hidden');
+    }
+
+    // Esconde a mensagem de erro (usado ao trocar de tela ou tentar de novo).
+    function limparErroAuth() {
+      authError.textContent = '';
+      authError.classList.add('hidden');
+    }
+
+    /* =====================================================================
+       [3.5] USUÁRIOS — cadastro, busca e validação de login
+       ---------------------------------------------------------------------
+       Aqui ficam as funções que gerenciam a "lista de funcionários"
+       cadastrados neste navegador.
+       ===================================================================== */
+
+    // Lê a lista de usuários da "gaveta" do navegador. Se algo der errado,
+    // devolve uma lista vazia (para o sistema não quebrar).
+    function carregarUsuarios() {
+      try {
+        const raw = localStorage.getItem(USERS_KEY);
+        const arr = raw ? JSON.parse(raw) : [];
+        return Array.isArray(arr) ? arr : [];
+      } catch { return []; }
+    }
+
+    // Salva a lista de usuários de volta na "gaveta".
+    function salvarUsuarios(users) {
+      localStorage.setItem(USERS_KEY, JSON.stringify(users));
+    }
+
+    // Procura um usuário pelo nome (ignora maiúsculas/minúsculas).
+    function buscarUsuario(username) {
+      return carregarUsuarios().find(
+        u => u.username.toLowerCase() === username.toLowerCase()
+      );
+    }
+
+    // Cria um novo usuário. Se já existir alguém com o mesmo nome,
+    // interrompe com uma mensagem de erro.
+    function criarUsuario(username, senha) {
+      if (buscarUsuario(username)) throw new Error('Este usuário já existe.');
+      const users = carregarUsuarios();
+      users.push({
+        username: username.trim(),
+        senhaHash: hashSimples(senha),         // senha "codificada"
+        criadoEm: new Date().toISOString()     // data/hora do cadastro
+      });
+      salvarUsuarios(users);
+    }
+
+    // Verifica se o nome + senha informados batem com um usuário cadastrado.
+    function validarCredenciais(username, senha) {
+      const u = buscarUsuario(username);
+      return !!u && u.senhaHash === hashSimples(senha);
+    }
+
+    /* =====================================================================
+       [3.6] SESSÃO — quem está logado agora
+       ---------------------------------------------------------------------
+       Usamos "sessionStorage" (uma gaveta temporária) porque queremos que
+       a sessão dure só enquanto a aba estiver aberta. As DEMANDAS ficam
+       no "localStorage" (permanente), então mesmo fechando o navegador
+       nada é perdido — só é preciso logar de novo.
+       ===================================================================== */
+    function salvarSessao(username) {
+      sessionStorage.setItem(SESSION_KEY, username);
+    }
+    function lerSessao() {
+      return sessionStorage.getItem(SESSION_KEY);
+    }
+    function limparSessao() {
+      sessionStorage.removeItem(SESSION_KEY);
+    }
+
+    /* =====================================================================
+       [3.7] PERSISTÊNCIA DE DEMANDAS (uma "gaveta" por funcionário)
+       ---------------------------------------------------------------------
+       Cada funcionário tem a SUA gaveta:
+         "agenda_demandas_v1::<nome_do_funcionario>"
+       Isso garante que um não enxergue as demandas do outro.
+       ===================================================================== */
+
+    // Monta o nome da gaveta de um funcionário específico.
+    function chaveDemandas(username) {
+      return DEMANDAS_PREFIX + username;
+    }
+
+    // Lê as demandas da gaveta do funcionário informado.
+    function carregarDemandas(username) {
+      try {
+        const raw = localStorage.getItem(chaveDemandas(username));
+        const arr = raw ? JSON.parse(raw) : [];
+        demandas = Array.isArray(arr) ? arr : [];
+      } catch { demandas = []; }
+    }
+
+    // Salva as demandas atuais na gaveta do funcionário LOGADO.
+    function salvarDemandas() {
+      if (!usuarioAtual) return; // segurança: sem usuário, não salva
+      localStorage.setItem(chaveDemandas(usuarioAtual), JSON.stringify(demandas));
+    }
+
+    /* =====================================================================
+       [3.8] RENDERIZAÇÃO — desenhar a interface na tela
+       ---------------------------------------------------------------------
+       "Renderizar" é redesenhar a lista e os contadores sempre que algo
+       muda. Assim o que aparece na tela reflete sempre os dados atuais.
+       ===================================================================== */
+
+    // Redesenha lista + contadores de uma vez.
+    function renderizar() {
+      renderizarLista();
+      renderizarContadores();
+    }
+
+    // Redesenha apenas os cartões de demandas (respeitando o filtro atual).
+    function renderizarLista() {
+      // 1) Aplica o filtro: "Todos" mostra tudo; senão, só o status escolhido.
+      const filtradas = filtroAtual === 'Todos'
+        ? demandas
+        : demandas.filter(d => d.status === filtroAtual);
+
+      // 2) Ordena: demandas com data aparecem primeiro (mais recente antes);
+      //    demandas sem data vão para o final.
+      const ordenadas = [...filtradas].sort((a, b) => {
+        if (!a.data && !b.data) return 0;
+        if (!a.data) return 1;
+        if (!b.data) return -1;
+        return b.data.localeCompare(a.data);
+      });
+
+      // 3) Limpa a área da lista e insere os cartões um a um.
+      listaEl.innerHTML = '';
+
+      // 4) Se nada para mostrar, exibe a mensagem de "lista vazia".
+      if (ordenadas.length === 0) {
+        emptyStateEl.classList.remove('hidden');
+        return;
+      }
+      emptyStateEl.classList.add('hidden');
+
+      ordenadas.forEach(d => listaEl.appendChild(criarCardDemanda(d)));
+    }
+
+    // Cria visualmente UM cartão de demanda (título, descrição, data,
+    // seletor de status e botões Editar/Excluir).
+    function criarCardDemanda(demanda) {
+      const card = document.createElement('article');
+      card.className = `demanda-card ${STATUS_CLASS[demanda.status] || ''}`;
+      card.dataset.id = demanda.id;
+
+      const titulo = document.createElement('h3');
+      titulo.textContent = demanda.titulo;
+
+      const descricao = document.createElement('p');
+      descricao.className = 'demanda-descricao';
+      descricao.textContent = demanda.descricao || '—';
+
+      const dataEl = document.createElement('p');
+      dataEl.className = 'demanda-data';
+      dataEl.textContent = demanda.data ? `📅 ${formatarData(demanda.data)}` : '';
+
+      const meta = document.createElement('div');
+      meta.className = 'demanda-meta';
+
+      // Seletor de status embutido no cartão:
+      // permite alterar o status rapidamente, sem abrir o formulário.
+      const statusSelect = document.createElement('select');
+      statusSelect.className = 'status-select';
+      statusSelect.setAttribute('aria-label', `Alterar status de "${demanda.titulo}"`);
+      STATUS_LIST.forEach(st => {
+        const opt = document.createElement('option');
+        opt.value = st; opt.textContent = st;
+        if (st === demanda.status) opt.selected = true;
+        statusSelect.appendChild(opt);
+      });
+      statusSelect.addEventListener('change', e => alterarStatus(demanda.id, e.target.value));
+
+      const actions = document.createElement('div');
+      actions.className = 'demanda-actions';
+
+      const btnEditar = document.createElement('button');
+      btnEditar.type = 'button';
+      btnEditar.className = 'btn-secondary btn-small';
+      btnEditar.textContent = 'Editar';
+      btnEditar.addEventListener('click', () => iniciarEdicao(demanda.id));
+
+      const btnExcluir = document.createElement('button');
+      btnExcluir.type = 'button';
+      btnExcluir.className = 'btn-danger btn-small';
+      btnExcluir.textContent = 'Excluir';
+      btnExcluir.addEventListener('click', () => excluirDemanda(demanda.id));
+
+      actions.append(btnEditar, btnExcluir);
+      card.append(titulo, descricao);
+      if (demanda.data) card.appendChild(dataEl);
+      meta.append(statusSelect);
+      card.append(meta, actions);
+      return card;
+    }
+
+    // Redesenha os contadores do topo (Total + quantidade por status).
+    function renderizarContadores() {
+      const total = demandas.length;
+      const contagens = STATUS_LIST.reduce((acc, st) => {
+        acc[st] = demandas.filter(d => d.status === st).length;
+        return acc;
+      }, {});
+
+      countersEl.innerHTML = `
+        <span class="counter">Total: <strong>${total}</strong></span>
+        ${STATUS_LIST.map(st =>
+          `<span class="counter">${st}: <strong>${contagens[st]}</strong></span>`
+        ).join('')}
+      `;
+    }
+
+    /* =====================================================================
+       [3.9] CRUD — Criar, Ler, Atualizar e Excluir demandas
+       ---------------------------------------------------------------------
+       Cada operação funciona SEMPRE sobre as demandas do funcionário logado.
+       Depois de qualquer alteração, salvamos e redesenhamos a tela.
+       ===================================================================== */
+
+    // Adiciona uma nova demanda à lista do usuário logado.
+    function adicionarDemanda(dados) {
+      demandas.push({
+        id: gerarId(),
+        owner: usuarioAtual,           // "dono" da demanda (reforço de segurança)
+        titulo: dados.titulo.trim(),
+        descricao: dados.descricao.trim(),
+        status: dados.status,
+        data: dados.data || '',
+        criadoEm: new Date().toISOString()
+      });
+      salvarDemandas();
+      renderizar();
+    }
+
+    // Atualiza TODOS os campos de uma demanda já existente (via formulário).
+    function atualizarDemanda(id, dados) {
+      demandas = demandas.map(d => d.id === id
+        ? { ...d, ...dados, titulo: dados.titulo.trim(), descricao: dados.descricao.trim() }
+        : d
+      );
+      salvarDemandas();
+      renderizar();
+    }
+
+    // Altera SOMENTE o status de uma demanda (via seletor dentro do cartão).
+    function alterarStatus(id, novoStatus) {
+      demandas = demandas.map(d => d.id === id ? { ...d, status: novoStatus } : d);
+      salvarDemandas();
+      renderizar();
+    }
+
+    // Exclui uma demanda após confirmação do usuário.
+    function excluirDemanda(id) {
+      const d = demandas.find(x => x.id === id);
+      if (!d) return;
+
+      // Confirmação obrigatória: evita exclusão por clique acidental.
+      if (!confirm(`Excluir a demanda "${d.titulo}"?\nEsta ação não pode ser desfeita.`)) return;
+
+      demandas = demandas.filter(x => x.id !== id);
+      salvarDemandas();
+      renderizar();
+
+      // Se a demanda excluída era a que estava sendo editada, cancela a edição.
+      if (idEmEdicao === id) cancelarEdicao();
+    }
+
+    /* =====================================================================
+       [3.10] EDIÇÃO — colocar os dados de uma demanda de volta no formulário
+       ---------------------------------------------------------------------
+       Ao clicar em "Editar", os campos do formulário são preenchidos com
+       os dados daquela demanda. O botão principal passa a dizer
+       "Salvar Alterações" e aparece o botão "Cancelar Edição".
+       ===================================================================== */
+    function iniciarEdicao(id) {
+      const d = demandas.find(x => x.id === id);
+      if (!d) return;
+
+      idEmEdicao = id;                            // marca qual está sendo editada
+      inputId.value = id;                          // guarda o ID no campo oculto
+      inputTitulo.value = d.titulo;
+      inputDescricao.value = d.descricao || '';
+      inputStatus.value = d.status;
+      inputData.value = d.data || '';
+
+      formTitle.textContent = 'Editar Demanda';
+      btnSubmit.textContent = 'Salvar Alterações';
+      btnCancelarEdicao.classList.remove('hidden'); // mostra "Cancelar"
+
+      // Rola a página até o formulário e posiciona o cursor no título.
+      form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      inputTitulo.focus();
+    }
+
+    // Cancela a edição: volta o formulário ao estado "Nova Demanda".
+    function cancelarEdicao() {
+      idEmEdicao = null;
+      form.reset();
+      inputId.value = '';
+      inputStatus.value = 'A Fazer';
+      formTitle.textContent = 'Nova Demanda';
+      btnSubmit.textContent = 'Adicionar Demanda';
+      btnCancelarEdicao.classList.add('hidden');
+    }
+
+    /* =====================================================================
+       [3.11] NAVEGAÇÃO ENTRE TELAS
+       ---------------------------------------------------------------------
+       Mostra a tela de login OU a tela principal, conforme o estado do
+       sistema. Nunca as duas ao mesmo tempo.
+       ===================================================================== */
+    function mostrarTelaAuth(modo) {
+      authMode = modo || 'login';
+
+      // Esconde o app e mostra o login.
+      viewApp.classList.add('hidden');
+      viewAuth.classList.remove('hidden');
+
+      const temUsuarios = carregarUsuarios().length > 0;
+
+      // Se ainda não existe NENHUM usuário, força o modo "criar conta",
+      // porque não haveria como logar.
+      if (!temUsuarios) {
+        authMode = 'register';
+      }
+
+      limparErroAuth();
+
+      // Ajusta textos e campos conforme o modo (login ou cadastro).
+      if (authMode === 'login') {
+        authTitle.textContent = 'Entrar';
+        authSubtitle.textContent = 'Acesse sua agenda pessoal de demandas.';
+        authSubmit.textContent = 'Entrar';
+        fieldConfirm.classList.add('hidden');
+        authPassword.autocomplete = 'current-password';
+        authSwitchText.textContent = 'Não tem conta?';
+        authSwitchLink.textContent = 'Criar conta';
+      } else {
+        authTitle.textContent = 'Criar conta';
+        authSubtitle.textContent = 'Cadastre-se para começar sua agenda.';
+        authSubmit.textContent = 'Criar conta e entrar';
+        fieldConfirm.classList.remove('hidden');
+        authPassword.autocomplete = 'new-password';
+        authSwitchText.textContent = 'Já tem conta?';
+        authSwitchLink.textContent = 'Entrar';
+      }
+
+      // No primeiro acesso (nenhum usuário), o link de troca é escondido.
+      if (!temUsuarios) {
+        authSwitchText.textContent = 'Primeiro acesso?';
+        authSwitchLink.textContent = '';
+        authSwitchLink.style.display = 'none';
+      } else {
+        authSwitchLink.style.display = '';
+      }
+
+      authForm.reset();
+      authUsername.focus();
+    }
+
+    // Mostra a tela principal e prepara tudo para o usuário logado.
+    function mostrarTelaApp() {
+      viewAuth.classList.add('hidden');
+      viewApp.classList.remove('hidden');
+      userBadge.textContent = `👤 ${usuarioAtual}`;
+      filtroAtual = 'Todos';
+      filterBtns.forEach(b => b.classList.toggle('active', b.dataset.filter === 'Todos'));
+      cancelarEdicao();
+      renderizar();
+    }
+
+    /* =====================================================================
+       [3.12] FLUXO DE LOGIN / CADASTRO / LOGOUT
+       ---------------------------------------------------------------------
+       ===================================================================== */
+
+    // Chamada quando o login (ou cadastro) dá certo: guarda o usuário,
+    // carrega as demandas dele e abre a tela principal.
+    function entrarComUsuario(username) {
+      usuarioAtual = username;
+      salvarSessao(username);
+      carregarDemandas(username);
+      mostrarTelaApp();
+    }
+
+    // Encerra a sessão: esquece o usuário e volta para a tela de login.
+    function fazerLogout() {
+      limparSessao();
+      usuarioAtual = null;
+      demandas = [];
+      idEmEdicao = null;
+      form.reset();
+      mostrarTelaAuth('login');
+    }
+
+    // ---- Ao enviar o formulário de login/cadastro ----
+    authForm.addEventListener('submit', e => {
+      e.preventDefault();
+      limparErroAuth();
+
+      const username = authUsername.value.trim();
+      const senha = authPassword.value;
+
+      // Validações básicas
+      if (!username) { mostrarErroAuth('Informe o nome de usuário.'); authUsername.focus(); return; }
+      if (senha.length < 4) { mostrarErroAuth('A senha deve ter pelo menos 4 caracteres.'); authPassword.focus(); return; }
+
+      if (authMode === 'register') {
+        // ---- Modo cadastro ----
+        const senhaConf = authPasswordConfirm.value;
+        if (senha !== senhaConf) { mostrarErroAuth('As senhas não coincidem.'); authPasswordConfirm.focus(); return; }
+        try {
+          criarUsuario(username, senha);
+          entrarComUsuario(username.trim());
+        } catch (err) {
+          mostrarErroAuth(err.message);
+        }
+      } else {
+        // ---- Modo login ----
+        if (!validarCredenciais(username, senha)) {
+          mostrarErroAuth('Usuário ou senha inválidos.');
+          return;
+        }
+        entrarComUsuario(buscarUsuario(username).username); // usa o nome "oficial"
+      }
+    });
+
+    // ---- Alternar entre "Entrar" e "Criar conta" ----
+    authSwitchLink.addEventListener('click', e => {
+      e.preventDefault();
+      mostrarTelaAuth(authMode === 'login' ? 'register' : 'login');
+    });
+
+    // ---- Botão "Sair" ----
+    btnLogout.addEventListener('click', () => {
+      if (confirm('Deseja sair da sua conta?')) fazerLogout();
+    });
+
+    /* =====================================================================
+       [3.13] EVENTOS DA TELA PRINCIPAL
+       ---------------------------------------------------------------------
+       Aqui ficam as reações do sistema às ações do usuário:
+       cadastrar/editar demandas e filtrar a lista.
+       ===================================================================== */
+
+    // ---- Ao enviar o formulário de demandas (novo OU edição) ----
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const titulo = inputTitulo.value.trim();
+      if (!titulo) { alert('O campo "Título" é obrigatório.'); inputTitulo.focus(); return; }
+
+      const dados = {
+        titulo,
+        descricao: inputDescricao.value,
+        status: inputStatus.value,
+        data: inputData.value
+      };
+
+      if (idEmEdicao) {
+        // Se havia uma demanda em edição, ATUALIZA ela.
+        atualizarDemanda(idEmEdicao, dados);
+        cancelarEdicao();
+      } else {
+        // Senão, ADICIONA uma nova.
+        adicionarDemanda(dados);
+        form.reset();
+        inputStatus.value = 'A Fazer';
+      }
+      inputTitulo.focus();
+    });
+
+    // ---- Botão "Cancelar Edição" ----
+    btnCancelarEdicao.addEventListener('click', cancelarEdicao);
+
+    // ---- Botões de filtro por status ----
+    filterBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        filtroAtual = btn.dataset.filter;
+        filterBtns.forEach(b => b.classList.toggle('active', b === btn));
+        renderizarLista();
+      });
+    });
+
+    /* =====================================================================
+       [3.14] INICIALIZAÇÃO — o que acontece ao abrir/recarregar a página
+       ---------------------------------------------------------------------
+       Se já existir uma sessão ativa (mesma aba), entra direto.
+       Caso contrário, mostra a tela de login.
+       ===================================================================== */
+    function init() {
+      const sessao = lerSessao();
+      if (sessao && buscarUsuario(sessao)) {
+        entrarComUsuario(buscarUsuario(sessao).username);
+      } else {
+        mostrarTelaAuth('login');
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
